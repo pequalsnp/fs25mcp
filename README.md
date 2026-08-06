@@ -48,9 +48,50 @@ An unpriced ingredient drops the recipe rather than being costed at zero:
 treating "the game did not say" as free turns a marginal chain into a
 spectacular one.
 
-## Status
+## Running it
 
-Parsers and planning are done and tested. The MCP server and the
-dial-out relay client are next.
+Two shapes, because they answer different questions. Neither needs a
+config file, and neither needs a language model to set up — the model is
+the consumer at the end of the pipe.
+
+**With the game** (companion app). On Steam, Properties → Launch Options:
+
+    fs25mcp play -- %command%
+
+Steam expands `%command%` to the real launcher, Proton and all, so the
+game starts exactly as it would have. The server runs for the length of
+the play session and stops with it. Nothing to remember.
+
+**All the time** (service). Better when something OTHER than the player
+wants the state — an assistant answering questions while the game is
+shut:
+
+    systemctl --user enable --now fs25mcp
+
+**Check it worked**, without involving a model:
+
+    $ fs25mcp status
+      install        .../steamapps/common/Farming Simulator 25
+                     version 1.21.1.0, 550 store items, 25 crops, 176 fill types
+      using          savegame4 — "My game save" on North Frisian 25 (a mod map)
+      money          136203 (loan 250000)
+      farmland       2 of 128 owned
+
+It finds the game and the savegame by itself, including inside the Proton
+prefix on Linux, which is where the save actually lives and where nobody
+would think to look. It picks the savegame you played most recently.
+`-install` / `-save` override that for a Steam library on another drive.
+
+Starting before the game is installed is fine: it serves anyway and picks
+things up when they appear, rather than exiting into a restart loop.
+
+## Talking to it
+
+`-addr` serves MCP over HTTP locally (default `127.0.0.1:14005`).
+
+`-relay ws://host/relay/fs25` instead dials OUT to a relay and serves
+through the tunnel, for the usual case where the gaming PC is behind a
+firewall and the assistant is somewhere else on the LAN. No inbound port,
+no firewall change, reconnects forever.
 
 MIT.

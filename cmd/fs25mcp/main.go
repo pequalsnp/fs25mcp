@@ -29,6 +29,10 @@ const usage = `fs25mcp — Farming Simulator 25 over MCP
 
   fs25mcp                 serve (auto-detects game and savegame)
   fs25mcp status          print what was found, and exit
+  fs25mcp play -- CMD     launch the game with the server alongside it,
+                          and stop when the game does. On Steam put
+                          "fs25mcp play -- %command%" in Launch Options
+                          and never think about it again.
   fs25mcp -h              flags
 
 Nothing needs configuring. Point -install/-save at them only if the
@@ -44,17 +48,41 @@ func main() {
 		addr       = flag.String("addr", "127.0.0.1:14005", "listen address for MCP over HTTP")
 		relayURL   = flag.String("relay", "", "optional: dial OUT to a relay instead of listening, e.g. http://host:8091/relay/fs25")
 	)
-	flag.Usage = func() { fmt.Fprint(os.Stderr, usage); flag.PrintDefaults() }
+	flag.Usage = func() { _, _ = os.Stderr.WriteString(usage); flag.PrintDefaults() }
 	flag.Parse()
 
-	src, err := resolve(*installDir, *saveDir, *savegame)
-	if err != nil {
-		log.Fatal(err)
-	}
+	src := &source{installDir: *installDir, saveDir: *saveDir, savegame: *savegame}
 
 	if flag.Arg(0) == "status" {
+		if err := src.ensure(); err != nil {
+			fmt.Fprintf(os.Stderr, "fs25mcp: %v\n", err)
+			os.Exit(1)
+		}
 		src.printStatus()
 		return
+	}
+
+	if flag.Arg(0) == "play" {
+		if err := src.ensure(); err != nil {
+			// Not fatal: the game is about to be launched, and on a first
+			// run the savegame does not exist until it has been played.
+			log.Printf("fs25mcp: %v (will retry once the game has saved)", err)
+		}
+		if err := runPlay(context.Background(), src, flag.Args()[1:], *addr, *relayURL); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
+	// Deliberately NOT fatal when the game is missing. This runs as a
+	// companion service that starts at login, which is before Steam has
+	// mounted a library on another drive, before a fresh install has any
+	// savegame, and while the player may simply not have got round to
+	// playing yet. Exiting would put systemd into a ten-second restart
+	// loop for as long as that lasts; instead it serves, and every tool
+	// reports the problem in words the player can act on.
+	if err := src.ensure(); err != nil {
+		log.Printf("fs25mcp: %v (will retry when a tool is called)", err)
 	}
 
 	server := newServer(src)
@@ -66,19 +94,41 @@ func main() {
 		log.Fatal(serveConnect(ctx, handler, *relayURL))
 	}
 
-	log.Printf("fs25mcp: serving %s (%s) on http://%s", src.Save.Name, src.Install.Version, *addr)
+	log.Printf("fs25mcp: serving on http://%s", *addr)
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 	srv := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	log.Fatal(srv.ListenAndServe())
 }
 
 // source is everything the tools read: the install, and one savegame.
+// Resolution is lazy so the service can start before the game exists.
 type source struct {
+	// Overrides, empty meaning auto-detect.
+	installDir string
+	saveDir    string
+	savegame   string
+
 	Install     *fs25data.Install
 	Save        *fs25save.Save
 	SaveName    string
 	SaveDir     string
 	InstallPath string
+}
+
+// ensure resolves the install and savegame if that has not happened yet.
+// Repeated calls after success are free; after failure it tries again,
+// which is what makes "start the service, then install the game" work.
+func (s *source) ensure() error {
+	if s.Install != nil && s.Save != nil {
+		return nil
+	}
+	got, err := resolve(s.installDir, s.saveDir, s.savegame)
+	if err != nil {
+		return err
+	}
+	s.Install, s.Save = got.Install, got.Save
+	s.SaveName, s.SaveDir, s.InstallPath = got.SaveName, got.SaveDir, got.InstallPath
+	return nil
 }
 
 func resolve(installDir, saveDir, savegame string) (*source, error) {
@@ -132,6 +182,9 @@ func resolve(installDir, saveDir, savegame string) (*source, error) {
 // time the player saved, so a tool that answers from a five-hour-old
 // save without saying so is worse than one that refuses.
 func (s *source) reload() error {
+	if err := s.ensure(); err != nil {
+		return err
+	}
 	sv, err := fs25save.Read(s.Save.Dir)
 	if err != nil {
 		return err
