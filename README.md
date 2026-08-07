@@ -87,7 +87,10 @@ things up when they appear, rather than exiting into a restart loop.
 
 ## Talking to it
 
-`-addr` serves MCP over HTTP locally (default `127.0.0.1:14005`).
+With no transport flag it serves over **stdio**, which is what a client
+that launches the server itself wants (Claude Desktop, a test harness).
+
+`--http host:port` serves MCP over HTTP instead, at `/mcp`.
 
 `--relay ws://host/relay/fs25` instead dials OUT to a relay and serves
 through the tunnel, for the usual case where the gaming PC is behind a
