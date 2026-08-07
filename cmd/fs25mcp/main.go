@@ -47,6 +47,7 @@ func main() {
 		savegame   = flag.String("savegame", "", "which savegame, e.g. savegame4 (default: most recently played)")
 		addr       = flag.String("addr", "127.0.0.1:14005", "listen address for MCP over HTTP")
 		relayURL   = flag.String("relay", "", "optional: dial OUT to a relay instead of listening, e.g. http://host:8091/relay/fs25")
+		stdio      = flag.Bool("stdio", false, "serve MCP over stdin/stdout instead of a port, for clients that launch the server themselves")
 	)
 	flag.Usage = func() { _, _ = os.Stderr.WriteString(usage); flag.PrintDefaults() }
 	flag.Parse()
@@ -87,6 +88,20 @@ func main() {
 
 	server := newServer(src)
 	ctx := context.Background()
+
+	// stdio: the client launches this process and owns its lifetime, which
+	// is how test harnesses and desktop MCP clients prefer to work — no
+	// port to collide with, no server left running afterwards.
+	//
+	// Logging MUST go to stderr here and nowhere near stdout: stdout is
+	// the JSON-RPC channel, and one stray line of log corrupts the stream.
+	// log's default is already stderr; this is a note against changing it.
+	if *stdio {
+		if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil {
+			log.Fatalf("fs25mcp: stdio: %v", err)
+		}
+		return
+	}
 
 	if *relayURL != "" {
 		log.Printf("fs25mcp: dialing relay %s", *relayURL)
