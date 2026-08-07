@@ -17,7 +17,7 @@ import (
 
 // errNoGameCommand is returned when play was given nothing to launch.
 var errNoGameCommand = errors.New(
-	`play needs the game command after --, e.g. "fs25mcp play -- %command%"`)
+	`play needs the game command after --, e.g. "fs25mcp play --relay ws://hum:8091/relay/fs25 -- %command%"`)
 
 // runPlay launches the game with the server running alongside it, and
 // stops the server when the game exits.
